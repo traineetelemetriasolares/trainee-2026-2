@@ -2,7 +2,7 @@
 
 Repositório central para o versionamento de código e entrega das atividades do processo seletivo de Telemetria do Projeto Solares.
 
-⚠️ **Atenção:** Todas as especificações técnicas, regras de negócio, etapas do desafio e critérios de avaliação estão detalhados **exclusivamente** no edital oficial. Consulte o arquivo **`Telemetria Trainee Solares.pdf`** anexado a este repositório antes de iniciar.
+⚠️ **Atenção:** Todas as especificações técnicas, etapas do desafio e critérios de avaliação estão detalhados **exclusivamente** no edital oficial. Consulte o arquivo **`Telemetria Trainee Solares.pdf`** anexado a este repositório antes de iniciar.
 
 ## 📂 Organização do Repositório
 
