@@ -1,0 +1,179 @@
+/*
+DISPOSIÇÃO DE PINOS
+A0 - Acelerador
+A1 - Temperatura
+2  - Botão ON/OFF
+3, 4, 5, 6 - Bits do display
+7  - IN2 ponte H
+8  - IN1 ponte H
+9  - "Liga" a ponte (PWM)
+11 - Liga o display
+12 - Registra no display
+13 - Chave de ré
+*/
+
+#include <LiquidCrystal.h>
+
+LiquidCrystal lcd(12, 11, 6, 5, 4, 3);
+
+const int pinAcelerador      = A0;
+const int pinTemperatura     = A1;
+const int pinONOFF           = 2;
+const int bit1               = 6;
+const int bit2               = 5;
+const int bit3               = 4;
+const int bit4               = 3;
+const int pinSentido1        = 8;
+const int pinSentido2        = 7;
+const int controleVelocidade = 9;
+const int ligaDisplay        = 11;
+const int displayReg         = 12;
+const int chaveRe            = 13;
+
+byte grau = 0;
+byte customChar[] = {
+  B00100, B01010, B00100, B00000,
+  B00000, B00000, B00000, B00000
+};
+
+bool estadoBotaoAnterior = false;
+bool estadoSistema       = false;
+
+// Controle de mudança de sentido e rampa
+bool estadoChaveReAntigo = false;
+int pwmAtual = 0; // Armazena a velocidade atual aplicada no pino PWM
+
+void setup() {
+    pinMode(pinAcelerador, INPUT);
+    pinMode(pinTemperatura, INPUT);
+    pinMode(pinONOFF, INPUT);
+    pinMode(chaveRe, INPUT);
+    
+    pinMode(controleVelocidade, OUTPUT);
+    pinMode(pinSentido1, OUTPUT);
+    pinMode(pinSentido2, OUTPUT);
+    pinMode(bit4, OUTPUT);
+    pinMode(bit3, OUTPUT);
+    pinMode(bit2, OUTPUT);
+    pinMode(bit1, OUTPUT);
+    pinMode(displayReg, OUTPUT);
+    pinMode(ligaDisplay, OUTPUT);
+
+    lcd.begin(16, 2);
+    lcd.clear();
+    
+    lcd.setCursor(0, 0);
+    lcd.print("Trainee 2026/2");
+    delay(2000);
+    lcd.clear();
+
+    lcd.createChar(grau, customChar);
+    
+    // Leitura inicial do estado da chave
+    estadoChaveReAntigo = digitalRead(chaveRe);
+}
+
+void loop() {
+    // 1 - Lógica do botão ON/OFF
+    bool estadoBotaoAtual = digitalRead(pinONOFF);
+    if (estadoBotaoAtual == HIGH && estadoBotaoAnterior == LOW) {
+        estadoSistema = !estadoSistema;
+        lcd.clear();
+        delay(200); // Debounce
+    }
+    estadoBotaoAnterior = estadoBotaoAtual;
+    
+    // 2 - Leitura do sensor TMP36
+    int leituraTempSensor = analogRead(pinTemperatura);
+    float temperatura = ((leituraTempSensor * 5000.0 / 1024.0) - 500.0) / 10.0;
+    
+    // 3 - Leitura do acelerador
+    int leituraAcel = analogRead(pinAcelerador);
+    int percentualAcel = map(leituraAcel, 0, 1023, 0, 100);
+    int valorPWM = map(leituraAcel, 0, 1023, 0, 255);
+
+    // 4 - Estado da chave de ré
+    bool estadoChaveReAtual = digitalRead(chaveRe);
+
+    // BARCO DESLIGADO
+    
+    if (!estadoSistema) {
+        pwmAtual = 0;       // adicionou o pwm = 0
+        analogWrite(controleVelocidade, 0);
+        digitalWrite(pinSentido1, LOW);
+        digitalWrite(pinSentido2, LOW);
+        
+        lcd.setCursor(0, 0);
+        lcd.print("Status: OFF     ");
+    }
+    // BARCO LIGADO
+    else {
+        // Exibição no Display
+        lcd.setCursor(0, 0);
+        lcd.print("T:");
+        lcd.print((int)temperatura);
+        lcd.write(grau);
+        lcd.print("C ");
+
+        lcd.print("Ac:");
+        if (estadoChaveReAtual) {   // tiou o digital read da chave de re e colocou a comparação direto no estado 
+            lcd.print("-");
+        } else {
+            lcd.print(" ");
+        }
+        lcd.print(percentualAcel);
+        lcd.print("%   ");
+        
+        lcd.setCursor(0, 1);
+        lcd.print("St:ON   ");
+
+        if (estadoChaveReAtual) {
+            lcd.print("Dir:RE ");
+        } else {
+            lcd.print("Dir:FRT");
+        }
+
+        // DETECÇÃO DE MUDANÇA DE MARCHA 
+        if (estadoChaveReAtual != estadoChaveReAntigo) {
+            // Rampa de desaceleração até 0
+            while (pwmAtual > 0) {
+                pwmAtual--;
+                analogWrite(controleVelocidade, pwmAtual);
+                delay(5);
+            }
+
+            // Inverte a Ponte H após a parada completa
+            if (estadoChaveReAtual) {
+                digitalWrite(pinSentido1, HIGH);
+                digitalWrite(pinSentido2, LOW);
+            } else {
+                digitalWrite(pinSentido1, LOW);
+                digitalWrite(pinSentido2, HIGH);
+            }
+
+            // Rampa de aceleração até o valor alvo do acelerador
+            while (pwmAtual < valorPWM) {
+                pwmAtual++;
+                analogWrite(controleVelocidade, pwmAtual);
+                delay(5);
+            }
+
+            estadoChaveReAntigo = estadoChaveReAtual;
+        } 
+        else {
+            // Operação normal: Ajusta os sentidos e atualiza a velocidade
+            if (estadoChaveReAtual) {
+                digitalWrite(pinSentido1, HIGH);
+                digitalWrite(pinSentido2, LOW);
+            } else {
+                digitalWrite(pinSentido1, LOW);
+                digitalWrite(pinSentido2, HIGH);
+            }
+
+            pwmAtual = valorPWM;
+            analogWrite(controleVelocidade, pwmAtual);
+        }
+    }
+}
+
+
