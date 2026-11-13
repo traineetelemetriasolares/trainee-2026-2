@@ -15,49 +15,52 @@ GPIO25 - Chave de ré
 
 #include <LiquidCrystal.h>
 
-LiquidCrystal lcd(GPIO_NUM_16, GPIO_NUM_17, GPIO_NUM_18, GPIO_NUM_19, GPIO_NUM_21, GPIO_NUM_22);
+// pinos do display q vamos usar (RS, E, DB4, DB5, DB6, DB7)
+LiquidCrystal lcd(16, 17, 18, 19, 21, 22);
 
-const int pinAcelerador      = GPIO_NUM_32;
-const int pinTemperatura     = GPIO_NUM_33;
-const int pinONOFF           = GPIO_NUM_26;
-const int bit1               = GPIO_NUM_18;
-const int bit2               = GPIO_NUM_19;
-const int bit3               = GPIO_NUM_21;
-const int bit4               = GPIO_NUM_22;
-const int pinSentido1        = GPIO_NUM_13;
-const int pinSentido2        = GPIO_NUM_14;
-const int ligaDisplay        = GPIO_NUM_17;
-const int displayReg         = GPIO_NUM_16;
-const int chaveRe            = GPIO_NUM_25;
+// definindo os pinos de entrada (sensores e comandos q vamos usar)
+const int pinAcelerador      = 32;
+const int pinTemperatura     = 33;
+const int pinONOFF           = 26;
+const int bit1               = 18;
+const int bit2               = 19;
+const int bit3               = 21;
+const int bit4               = 22;
+const int pinSentido1        = 13;
+const int pinSentido2        = 14;
+const int ligaDisplay        = 17;
+const int displayReg         = 16;
+const int chaveRe            = 25;
 
+// variaveis
 
-//criando caracter customizado
+// caracter celsius
 byte grau = 0;
 byte customChar[] = {
   B00100, B01010, B00100, B00000,
   B00000, B00000, B00000, B00000
 };
 
-//variaveis de estado
+// estado sistema on off
 bool estadoBotaoAnterior = false;
 bool estadoSistema       = false;
 
-// Controle de mudança de sentido e rampa
 bool estadoChaveReAntigo = false;
-int pwmAtual = 0; // Armazena a velocidade atual aplicada no pino PWM
+int pwmAtual = 0; 
 
-//configuracoes do pwm ESP32
-const int canalPWM = 0; // escolhe um canal do modulo pwm dentro do esp
+// configuracoes do pwm ESP32
 const int frequenciaPWM = 5000; 
 const int resolucaoPWM = 8; // resolucao de 0 a 255 pois o codigo opera deste jeito 
 
-
+// definindo função dos pinos
 void setup() {
+    // pinos de entrada
     pinMode(pinAcelerador, INPUT);
     pinMode(pinTemperatura, INPUT);
     pinMode(pinONOFF, INPUT);
     pinMode(chaveRe, INPUT);
     
+    // pinos de saida
     pinMode(pinSentido1, OUTPUT);
     pinMode(pinSentido2, OUTPUT);
     pinMode(bit4, OUTPUT);
@@ -67,60 +70,74 @@ void setup() {
     pinMode(displayReg, OUTPUT);
     pinMode(ligaDisplay, OUTPUT);
 
+    // configuração lcd
     lcd.begin(16, 2);
     lcd.clear();
     
+    // escreve trainee 2026/2 por um tempo depois apaga 
     lcd.setCursor(0, 0);
     lcd.print("Trainee 2026/2");
     delay(2000);
     lcd.clear();
 
+    // criando o caractere customizado
     lcd.createChar(grau, customChar);
     
-    // Leitura inicial do estado da chave
     estadoChaveReAntigo = digitalRead(chaveRe);
-
-    //pwm
-    ledcSetup(canalPWM, frequenciaPWM, resolucaoPWM); // configura o pwm
-    ledcAttachPin(controleVelocidade, canalPWM); //escolhe o pino do pwm e associa ao canal
+    if (estadoChaveReAntigo) {
+        ledcAttach(pinSentido2, frequenciaPWM, resolucaoPWM);
+        digitalWrite(pinSentido1, LOW);
+    } else {
+        ledcAttach(pinSentido1, frequenciaPWM, resolucaoPWM);
+        digitalWrite(pinSentido2, LOW);
+    }
 }
 
 void loop() {
-    // 1 - Lógica do botão ON/OFF
+    // 1 - Logica do botão ON/OFF
     bool estadoBotaoAtual = digitalRead(pinONOFF);
     if (estadoBotaoAtual == HIGH && estadoBotaoAnterior == LOW) {
         estadoSistema = !estadoSistema;
-        lcd.clear();
-        delay(200); // Debounce
+        if(estadoSistema == true) {   // evita da mensagem aparecer um monte de vezes por dar clear antes e depois de printar
+            lcd.clear();
+        } else {
+            lcd.clear(); // limpa a tela na hora de desligar
+        }
+        delay(200);  // debounce (q é o tempo q a plaquinha de metal do botao vibra muito pra contar como ligado/true)
     }
     estadoBotaoAnterior = estadoBotaoAtual;
     
-    // 2 - Leitura do sensor TMP36
+    // 2 - Logica da leitura da temperatura pelo TMP36
     int leituraTempSensor = analogRead(pinTemperatura);
-    float temperatura = ((leituraTempSensor *3300.0 / 4095.0) - 500.0) / 10.0;
+    // o sensor conta 1024 niveis, maximo de 5v. comeca em 0c = 500mv e a cada 1c aumenta 10mv
+    float temperatura = ((leituraTempSensor * 3300.0 / 4095.0) - 500.0) / 10.0;
     
-    // 3 - Leitura do acelerador
+    // 3 - Leitura acelerador 
     int leituraAcel = analogRead(pinAcelerador);
     int percentualAcel = map(leituraAcel, 0, 4095, 0, 100);
     int valorPWM = map(leituraAcel, 0, 4095, 0, 255);
 
-    // 4 - Estado da chave de ré
     bool estadoChaveReAtual = digitalRead(chaveRe);
 
-    // BARCO DESLIGADO
-    
+    // 4 - Controle do motor e exibição dos dados no display
+
+    // barco desligado
     if (!estadoSistema) {
-        pwmAtual = 0;       // adicionou o pwm = 0
-        ledcWrite(canalPWM, 0);
-        digitalWrite(pinSentido1, LOW);
-        digitalWrite(pinSentido2, LOW);
+        pwmAtual = 0;       
+        
+        // Garante todas as saidas do motor estejam desligadas
+        if (estadoChaveReAtual) {
+            ledcWrite(pinSentido2, 0);
+        } else {
+            ledcWrite(pinSentido1, 0);
+        }
         
         lcd.setCursor(0, 0);
         lcd.print("Status: OFF     ");
     }
-    // BARCO LIGADO
+    // barco ligado
     else {
-        // Exibição no Display
+        // linha de cima (mostra temperatura e a % da aceleração)
         lcd.setCursor(0, 0);
         lcd.print("T:");
         lcd.print((int)temperatura);
@@ -128,7 +145,7 @@ void loop() {
         lcd.print("C ");
 
         lcd.print("Ac:");
-        if (estadoChaveReAtual) {   // tiou o digital read da chave de re e colocou a comparação direto no estado 
+        if (estadoChaveReAtual) {  
             lcd.print("-");
         } else {
             lcd.print(" ");
@@ -136,54 +153,80 @@ void loop() {
         lcd.print(percentualAcel);
         lcd.print("%   ");
         
+        // status do motor
         lcd.setCursor(0, 1);
         lcd.print("St:ON   ");
 
+        // direção 
         if (estadoChaveReAtual) {
             lcd.print("Dir:RE ");
         } else {
             lcd.print("Dir:FRT");
         }
 
-        // DETECÇÃO DE MUDANÇA DE MARCHA 
+        // configuraçao do motor (ponte H)
         if (estadoChaveReAtual != estadoChaveReAntigo) {
-            // Rampa de desaceleração até 0
+            
             while (pwmAtual > 0) {
                 pwmAtual--;
-                ledcWrite(canalPWM, pwmAtual);
+                if (estadoChaveReAntigo) {
+                    ledcWrite(pinSentido2, pwmAtual);
+                } else {
+                    ledcWrite(pinSentido1, pwmAtual);
+                }
                 delay(5);
             }
 
-            // Inverte a Ponte H após a parada completa
             if (estadoChaveReAtual) {
-                digitalWrite(pinSentido1, HIGH);
-                digitalWrite(pinSentido2, LOW);
+                ledcDetach(pinSentido1); 
+                digitalWrite(pinSentido1, LOW); 
+                ledcAttach(pinSentido2, frequenciaPWM, resolucaoPWM); 
             } else {
-                digitalWrite(pinSentido1, LOW);
-                digitalWrite(pinSentido2, HIGH);
+                ledcDetach(pinSentido2); 
+                digitalWrite(pinSentido2, LOW); 
+                ledcAttach(pinSentido1, frequenciaPWM, resolucaoPWM); 
             }
 
-            // Rampa de aceleração até o valor alvo do acelerador
             while (pwmAtual < valorPWM) {
                 pwmAtual++;
-                ledcWrite(canalPWM, pwmAtual);
+                if (estadoChaveReAtual) {
+                    ledcWrite(pinSentido2, pwmAtual);
+                } else {
+                    ledcWrite(pinSentido1, pwmAtual);
+                }
                 delay(5);
             }
 
             estadoChaveReAntigo = estadoChaveReAtual;
         } 
         else {
-            // Operação normal: Ajusta os sentidos e atualiza a velocidade
-            if (estadoChaveReAtual) {
-                digitalWrite(pinSentido1, HIGH);
-                digitalWrite(pinSentido2, LOW);
-            } else {
-                digitalWrite(pinSentido1, LOW);
-                digitalWrite(pinSentido2, HIGH);
+            while (pwmAtual < valorPWM) {
+                pwmAtual++;
+                if (estadoChaveReAtual) {
+                    ledcWrite(pinSentido2, pwmAtual);
+                } else {
+                    ledcWrite(pinSentido1, pwmAtual);
+                }
+                delay(5);
             }
-
+            while (pwmAtual > valorPWM) {
+                pwmAtual--;
+                if (estadoChaveReAtual) {
+                    ledcWrite(pinSentido2, pwmAtual);
+                } else {
+                    ledcWrite(pinSentido1, pwmAtual);
+                }
+                delay(5);
+            }
+            
             pwmAtual = valorPWM;
-            ledcWrite(canalPWM, pwmAtual);
+            
+            // manda o valor do pwm pra ponte H, q dai faz o motor funcionar com base no valor do sinal (se for baixo gira pouco e se for alto gira muito)
+            if (estadoChaveReAtual) {
+                ledcWrite(pinSentido2, pwmAtual);
+            } else {
+                ledcWrite(pinSentido1, pwmAtual);
+            }
         }
     }
 }
