@@ -1,34 +1,34 @@
 /*
 DISPOSIÇÃO DE PINOS
-A0 - Acelerador
-A1 - Temperatura
-2  - Botão ON/OFF
-3, 4, 5, 6 - Bits do display
-7  - IN2 ponte H
-8  - IN1 ponte H
-9  - ponte PWM
-11 - liga o display
-12 - Seleciona se o display recebe comandos ou dados
-13 - Chave de ré
+GPIO32 - Acelerador
+GPIO33 - Temperatura
+GPIO26  - Botão ON/OFF
+GPIO 18,19,21,22 - Bits do display
+GPIO14  - IN2 ponte H
+GPIO13  - IN1 ponte H
+TX2/GPIO17 - liga o display
+RX2/GPIO16 - Seleciona se o display recebe comandos ou dados
+GPIO25 - Chave de ré
+
+**O controleVelocidade foi retirado, pois o pwm é feito pelo esp
 */
 
 #include <LiquidCrystal.h>
 
-LiquidCrystal lcd(12, 11, 6, 5, 4, 3);
+LiquidCrystal lcd(GPIO_NUM_16, GPIO_NUM_17, GPIO_NUM_18, GPIO_NUM_19, GPIO_NUM_21, GPIO_NUM_22);
 
-const int pinAcelerador      = A0;
-const int pinTemperatura     = A1;
-const int pinONOFF           = 2;
-const int bit1               = 6;
-const int bit2               = 5;
-const int bit3               = 4;
-const int bit4               = 3;
-const int pinSentido1        = 8;
-const int pinSentido2        = 7;
-const int controleVelocidade = 9;
-const int ligaDisplay        = 11;
-const int displayReg         = 12;
-const int chaveRe            = 13;
+const int pinAcelerador      = GPIO_NUM_32;
+const int pinTemperatura     = GPIO_NUM_33;
+const int pinONOFF           = GPIO_NUM_26;
+const int bit1               = GPIO_NUM_18;
+const int bit2               = GPIO_NUM_19;
+const int bit3               = GPIO_NUM_21;
+const int bit4               = GPIO_NUM_22;
+const int pinSentido1        = GPIO_NUM_13;
+const int pinSentido2        = GPIO_NUM_14;
+const int ligaDisplay        = GPIO_NUM_17;
+const int displayReg         = GPIO_NUM_16;
+const int chaveRe            = GPIO_NUM_25;
 
 
 //criando caracter customizado
@@ -48,8 +48,8 @@ int pwmAtual = 0; // Armazena a velocidade atual aplicada no pino PWM
 
 //configuracoes do pwm ESP32
 const int canalPWM = 0; // escolhe um canal do modulo pwm dentro do esp
-const int frequenciaPWM = 5000;
-const int resolucaoPWM = 8; //resolucao de 0 a 255 
+const int frequenciaPWM = 5000; 
+const int resolucaoPWM = 8; // resolucao de 0 a 255 pois o codigo opera deste jeito 
 
 
 void setup() {
