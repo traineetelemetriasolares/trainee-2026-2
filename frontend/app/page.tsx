@@ -78,7 +78,7 @@ export default function Home() {
             Temperatura
           </h3>
           
-          <div className="h-64 w-150 mt-8">
+          <div className="h-58 w-150 mt-8">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={dadosTemperatura}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -98,7 +98,7 @@ export default function Home() {
         </div>
 
         <div>  
-          <h3 className="text-xl text-slate-800 font-bold mt-8 ml-6 bg-slate-300 rounded-xl px-10 py-1.5 w-fit">
+          <h3 className="text-xl text-slate-800 font-bold mt-2 ml-6 bg-slate-300 rounded-xl px-10 py-1.5 w-fit">
             Aceleração
           </h3>
 
@@ -122,7 +122,7 @@ export default function Home() {
         </div>
 
         <div>  
-          <h3 className="text-xl text-slate-800 font-bold mt-8 ml-6 bg-slate-300 rounded-xl px-10 py-1.5 w-fit">
+          <h3 className="text-xl text-slate-800 font-bold mt-2 ml-6 bg-slate-300 rounded-xl px-10 py-1.5 w-fit">
             Sentido
           </h3>
 
