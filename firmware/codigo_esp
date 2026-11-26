@@ -1,232 +1,196 @@
-/*
-DISPOSIÇÃO DE PINOS
-GPIO32 - Acelerador
-GPIO33 - Temperatura
-GPIO26  - Botão ON/OFF
-GPIO 18,19,21,22 - Bits do display
-GPIO14  - IN2 ponte H
-GPIO13  - IN1 ponte H
-TX2/GPIO17 - liga o display
-RX2/GPIO16 - Seleciona se o display recebe comandos ou dados
-GPIO25 - Chave de ré
-
-**O controleVelocidade foi retirado, pois o pwm é feito pelo esp
-*/
-
 #include <LiquidCrystal.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 
-// pinos do display q vamos usar (RS, E, DB4, DB5, DB6, DB7)
+// CONFIGURAÇÕES DE REDE
+const char* ssid      = "nome-wifi";
+const char* password  = "senha";
+const char* serverUrl = "http://(ip-pc):3001/telemetria"; // IPv4 notebook
+
+// Pinos do display (RS, E, DB4, DB5, DB6, DB7)
 LiquidCrystal lcd(16, 17, 18, 19, 21, 22);
 
-// definindo os pinos de entrada (sensores e comandos q vamos usar)
-const int pinAcelerador      = 32;
-const int pinTemperatura     = 33;
-const int pinONOFF           = 26;
-const int bit1               = 18;
-const int bit2               = 19;
-const int bit3               = 21;
-const int bit4               = 22;
-const int pinSentido1        = 13;
-const int pinSentido2        = 14;
-const int ligaDisplay        = 17;
-const int displayReg         = 16;
-const int chaveRe            = 25;
+// Pinos de entrada
+const int pinAcelerador  = 32;
+const int pinTemperatura = 33;
+const int pinONOFF       = 26;
+const int chaveRe        = 25;
 
-// variaveis
+// Pinos de saída do motor
+const int pinSentido1    = 13; // IN1
+const int pinSentido2    = 14; // IN2
 
-// caracter celsius
+// Caractere customizado de grau
 byte grau = 0;
 byte customChar[] = {
   B00100, B01010, B00100, B00000,
   B00000, B00000, B00000, B00000
 };
 
-// estado sistema on off
+// Estados do sistema
 bool estadoBotaoAnterior = false;
 bool estadoSistema       = false;
-
 bool estadoChaveReAntigo = false;
-int pwmAtual = 0; 
+int pwmAtual             = 0;
 
-// configuracoes do pwm ESP32
-const int frequenciaPWM = 5000; 
-const int resolucaoPWM = 8; // resolucao de 0 a 255 pois o codigo opera deste jeito 
+// Configurações do PWM ESP32
+const int frequenciaPWM = 5000;
+const int resolucaoPWM  = 8; // 0 a 255
 
-// definindo função dos pinos
+// Controle de tempo para envio HTTP sem bloquear o motor
+unsigned long ultimoEnvio = 0;
+const unsigned long intervaloEnvio = 500; // envia a cada 500 ms (2x por segundo)
+
 void setup() {
-    // pinos de entrada
-    pinMode(pinAcelerador, INPUT);
-    pinMode(pinTemperatura, INPUT);
-    pinMode(pinONOFF, INPUT);
-    pinMode(chaveRe, INPUT);
-    
-    // pinos de saida
-    pinMode(pinSentido1, OUTPUT);
-    pinMode(pinSentido2, OUTPUT);
-    pinMode(bit4, OUTPUT);
-    pinMode(bit3, OUTPUT);
-    pinMode(bit2, OUTPUT);
-    pinMode(bit1, OUTPUT);
-    pinMode(displayReg, OUTPUT);
-    pinMode(ligaDisplay, OUTPUT);
+  Serial.begin(115200);
 
-    // configuração lcd
-    lcd.begin(16, 2);
-    lcd.clear();
-    
-    // escreve trainee 2026/2 por um tempo depois apaga 
+  // entradas
+  pinMode(pinAcelerador, INPUT);
+  pinMode(pinTemperatura, INPUT);
+  // entradas com pull-down interno  
+  pinMode(pinONOFF, INPUT_PULLDOWN);
+  pinMode(chaveRe, INPUT_PULLDOWN);
+
+  // Configura PWM da Ponte H
+  ledcAttach(pinSentido1, frequenciaPWM, resolucaoPWM);
+  ledcAttach(pinSentido2, frequenciaPWM, resolucaoPWM);
+  ledcWrite(pinSentido1, 0);
+  ledcWrite(pinSentido2, 0);
+
+  // Inicializa LCD
+  lcd.begin(16, 2);
+  lcd.createChar(grau, customChar);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Trainee 2026/2");
+  lcd.setCursor(0, 1);
+  lcd.print("Conectando WiFi");
+
+  // Conecta ao Wi-Fi (com limite de 10s para não travar a bancada se estiver sem rede)
+  WiFi.begin(ssid, password);
+  int tentativas = 0;
+  while (WiFi.status() != WL_CONNECTED && tentativas < 20) {
+    delay(500);
+    Serial.print(".");
+    tentativas++;
+  }
+
+  lcd.clear();
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWi-Fi conectado! IP ESP32: " + WiFi.localIP().toString());
     lcd.setCursor(0, 0);
-    lcd.print("Trainee 2026/2");
-    delay(2000);
-    lcd.clear();
+    lcd.print("WiFi OK!");
+  } else {
+    Serial.println("\nFalha no Wi-Fi. Rodando modo local.");
+    lcd.setCursor(0, 0);
+    lcd.print("Sem WiFi");
+  }
+  delay(1500);
+  lcd.clear();
 
-    // criando o caractere customizado
-    lcd.createChar(grau, customChar);
-    
-    estadoChaveReAntigo = digitalRead(chaveRe);
-    if (estadoChaveReAntigo) {
-        ledcAttach(pinSentido2, frequenciaPWM, resolucaoPWM);
-        digitalWrite(pinSentido1, LOW);
-    } else {
-        ledcAttach(pinSentido1, frequenciaPWM, resolucaoPWM);
-        digitalWrite(pinSentido2, LOW);
-    }
+  estadoChaveReAntigo = digitalRead(chaveRe);
 }
 
 void loop() {
-    // 1 - Logica do botão ON/OFF
-    bool estadoBotaoAtual = digitalRead(pinONOFF);
-    if (estadoBotaoAtual == HIGH && estadoBotaoAnterior == LOW) {
-        estadoSistema = !estadoSistema;
-        if(estadoSistema == true) {   // evita da mensagem aparecer um monte de vezes por dar clear antes e depois de printar
-            lcd.clear();
-        } else {
-            lcd.clear(); // limpa a tela na hora de desligar
-        }
-        delay(200);  // debounce (q é o tempo q a plaquinha de metal do botao vibra muito pra contar como ligado/true)
+  // Lógica do botão ON/OFF
+  bool estadoBotaoAtual = digitalRead(pinONOFF);
+  if (estadoBotaoAtual == HIGH && estadoBotaoAnterior == LOW) {
+    estadoSistema = !estadoSistema;
+    lcd.clear();
+    delay(200);
+  }
+  estadoBotaoAnterior = estadoBotaoAtual;
+
+  // Leitura de temperatura (TMP36)
+  int leituraTempSensor = analogRead(pinTemperatura);
+  float temperatura = ((leituraTempSensor * 3300.0 / 4095.0) - 500.0) / 10.0;
+
+  // Leitura do acelerador e da chave de ré
+  int leituraAcel = analogRead(pinAcelerador);
+  int percentualAcel = map(leituraAcel, 0, 4095, 0, 100);
+  int valorPWM = map(leituraAcel, 0, 4095, 0, 255);
+  bool estadoChaveReAtual = digitalRead(chaveRe);
+
+  // Controle do motor e display
+  if (!estadoSistema) {
+    pwmAtual = 0;
+    ledcWrite(pinSentido1, 0);
+    ledcWrite(pinSentido2, 0);
+    estadoChaveReAntigo = estadoChaveReAtual;
+
+    lcd.setCursor(0, 0);
+    lcd.print("Status: OFF     ");
+    lcd.setCursor(0, 1);
+    lcd.print("                ");
+  } else {
+    lcd.setCursor(0, 0);
+    lcd.print("T:");
+    lcd.print((int)temperatura);
+    lcd.write(grau);
+    lcd.print("C Ac:");
+    lcd.print(estadoChaveReAtual ? "-" : " ");
+    lcd.print(percentualAcel);
+    lcd.print("%   ");
+
+    lcd.setCursor(0, 1);
+    lcd.print("St:ON   ");
+    lcd.print(estadoChaveReAtual ? "Dir:RE " : "Dir:FRT");
+
+    if (estadoChaveReAtual != estadoChaveReAntigo) {
+      if (pwmAtual > 0) {
+        pwmAtual--;
+      } else {
+        estadoChaveReAntigo = estadoChaveReAtual;
+      }
+    } else {
+      if (pwmAtual < valorPWM) {
+        pwmAtual++;
+      } else if (pwmAtual > valorPWM) {
+        pwmAtual--;
+      }
     }
-    estadoBotaoAnterior = estadoBotaoAtual;
-    
-    // 2 - Logica da leitura da temperatura pelo TMP36
-    int leituraTempSensor = analogRead(pinTemperatura);
-    // o sensor conta 1024 niveis, maximo de 5v. comeca em 0c = 500mv e a cada 1c aumenta 10mv
-    float temperatura = ((leituraTempSensor * 3300.0 / 4095.0) - 500.0) / 10.0;
-    
-    // 3 - Leitura acelerador 
-    int leituraAcel = analogRead(pinAcelerador);
-    int percentualAcel = map(leituraAcel, 0, 4095, 0, 100);
-    int valorPWM = map(leituraAcel, 0, 4095, 0, 255);
 
-    bool estadoChaveReAtual = digitalRead(chaveRe);
-
-    // 4 - Controle do motor e exibição dos dados no display
-
-    // barco desligado
-    if (!estadoSistema) {
-        pwmAtual = 0;       
-        
-        // Garante todas as saidas do motor estejam desligadas
-        if (estadoChaveReAtual) {
-            ledcWrite(pinSentido2, 0);
-        } else {
-            ledcWrite(pinSentido1, 0);
-        }
-        
-        lcd.setCursor(0, 0);
-        lcd.print("Status: OFF     ");
+    if (estadoChaveReAntigo) {
+      ledcWrite(pinSentido1, 0);
+      ledcWrite(pinSentido2, pwmAtual);
+    } else {
+      ledcWrite(pinSentido2, 0);
+      ledcWrite(pinSentido1, pwmAtual);
     }
-    // barco ligado
-    else {
-        // linha de cima (mostra temperatura e a % da aceleração)
-        lcd.setCursor(0, 0);
-        lcd.print("T:");
-        lcd.print((int)temperatura);
-        lcd.write(grau);
-        lcd.print("C ");
+  }
 
-        lcd.print("Ac:");
-        if (estadoChaveReAtual) {  
-            lcd.print("-");
-        } else {
-            lcd.print(" ");
-        }
-        lcd.print(percentualAcel);
-        lcd.print("%   ");
-        
-        // status do motor
-        lcd.setCursor(0, 1);
-        lcd.print("St:ON   ");
+  // Envio de telemetria via HTTP POST a cada 500 ms
+  if (millis() - ultimoEnvio >= intervaloEnvio) {
+    ultimoEnvio = millis();
 
-        // direção 
-        if (estadoChaveReAtual) {
-            lcd.print("Dir:RE ");
-        } else {
-            lcd.print("Dir:FRT");
-        }
+    if (WiFi.status() == WL_CONNECTED) {
+      HTTPClient http;
+      http.begin(serverUrl);
+      http.addHeader("Content-Type", "application/json");
+      http.setTimeout(1000); // evita travar o loop se a rede oscilar
 
-        // configuraçao do motor (ponte H)
-        if (estadoChaveReAtual != estadoChaveReAntigo) {
-            
-            while (pwmAtual > 0) {
-                pwmAtual--;
-                if (estadoChaveReAntigo) {
-                    ledcWrite(pinSentido2, pwmAtual);
-                } else {
-                    ledcWrite(pinSentido1, pwmAtual);
-                }
-                delay(5);
-            }
+      // Quando o barco está OFF envia 0% de aceleração para o gráfico
+      int aceleracaoEnvio = estadoSistema ? percentualAcel : 0;
 
-            if (estadoChaveReAtual) {
-                ledcDetach(pinSentido1); 
-                digitalWrite(pinSentido1, LOW); 
-                ledcAttach(pinSentido2, frequenciaPWM, resolucaoPWM); 
-            } else {
-                ledcDetach(pinSentido2); 
-                digitalWrite(pinSentido2, LOW); 
-                ledcAttach(pinSentido1, frequenciaPWM, resolucaoPWM); 
-            }
+      // Monta o JSON com as chaves exatas que o backend e o frontend esperam
+      String jsonPayload = "{";
+      jsonPayload += "\"temperatura\":" + String(temperatura, 1) + ",";
+      jsonPayload += "\"aceleracao\":" + String(aceleracaoEnvio) + ",";
+      jsonPayload += "\"status\":" + String(estadoSistema ? "true" : "false") + ",";
+      jsonPayload += "\"re\":" + String(estadoChaveReAntigo ? "true" : "false");
+      jsonPayload += "}";
 
-            while (pwmAtual < valorPWM) {
-                pwmAtual++;
-                if (estadoChaveReAtual) {
-                    ledcWrite(pinSentido2, pwmAtual);
-                } else {
-                    ledcWrite(pinSentido1, pwmAtual);
-                }
-                delay(5);
-            }
+      int httpCode = http.POST(jsonPayload);
 
-            estadoChaveReAntigo = estadoChaveReAtual;
-        } 
-        else {
-            while (pwmAtual < valorPWM) {
-                pwmAtual++;
-                if (estadoChaveReAtual) {
-                    ledcWrite(pinSentido2, pwmAtual);
-                } else {
-                    ledcWrite(pinSentido1, pwmAtual);
-                }
-                delay(5);
-            }
-            while (pwmAtual > valorPWM) {
-                pwmAtual--;
-                if (estadoChaveReAtual) {
-                    ledcWrite(pinSentido2, pwmAtual);
-                } else {
-                    ledcWrite(pinSentido1, pwmAtual);
-                }
-                delay(5);
-            }
-            
-            pwmAtual = valorPWM;
-            
-            // manda o valor do pwm pra ponte H, q dai faz o motor funcionar com base no valor do sinal (se for baixo gira pouco e se for alto gira muito)
-            if (estadoChaveReAtual) {
-                ledcWrite(pinSentido2, pwmAtual);
-            } else {
-                ledcWrite(pinSentido1, pwmAtual);
-            }
-        }
+      if (httpCode > 0) {
+        Serial.printf("POST OK (%d) -> %s\n", httpCode, jsonPayload.c_str());
+      } else {
+        Serial.printf("Erro no POST: %s\n", http.errorToString(httpCode).c_str());
+      }
+
+      http.end();
     }
+  }
+
+  delay(5);
 }
